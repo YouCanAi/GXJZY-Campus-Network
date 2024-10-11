@@ -1,0 +1,88 @@
+#!/bin/bash
+
+# Function to check if a string is a valid MD5 hash
+is_valid_md5() {
+    local text=$1
+    local pattern="^[a-f0-9]{32}$"
+    [[ $text =~ $pattern ]] # Return true if valid, false otherwise
+}
+
+# Validate IP address format
+validate_ip() {
+    local ip=$1
+    local pattern="^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
+    if ! [[ $ip =~ $pattern ]]; then
+        echo "'$ip' is not a valid IP address"
+        exit 1
+    fi
+}
+
+# Send HTTP request method
+send_request() {
+    local ip=$1
+    local path=$2
+    local data=$3
+    local referer=${4:-""}
+    local user_agent=${5:-"Mozilla/5.0"} # Default user agent
+    local headers=(
+        "Accept: application/json, text/javascript, */*; q=0.01"
+        "Accept-Language: zh-TW,zh;q=0.9"
+        "User-Agent: $user_agent"
+        "Referer: http://$ip/"
+        "Origin: http://$ip"
+        "X-Requested-With: XMLHttpRequest"
+    )
+
+    [[ -n $referer ]] && headers+=("Referer: $referer") # Add referer if provided
+
+    curl -s -H "${headers[@]}" -d "$data" "http://$ip/$path"
+}
+
+# Login method
+login() {
+    local ip=$1
+    local user=$2
+    local pass=$3
+    local data="user=$user&pass=$pass&authmode=0&pool=&isp_id=0&pxyacct="
+
+    send_request "$ip" "api/ip.php"
+    send_request "$ip" "api/pool.php"
+    send_request "$ip" "api/login.php" "$data"
+    send_request "$ip" "api/ack_auth.php" "$data"
+
+    # shellcheck disable=SC2155
+    local response=$(send_request "$ip" "api/stat.php" "$data")
+    # shellcheck disable=SC2155
+    local ret=$(echo "$response" | jq -r '.ret')
+
+    if [[ $ret -eq 0 ]]; then
+        echo "Login successful"
+    else
+        echo "Login failed"
+    fi
+}
+
+# Logout method
+logout() {
+    local ip=$1
+    send_request "$ip" "api/logoff.php"
+}
+
+# Main script execution
+if [[ $# -ne 2 ]]; then
+    echo "Usage: $0 <username> <password>"
+    exit 1
+fi
+
+# Validate IP address
+validate_ip "$ip"
+
+logout "$ip"
+
+/sbin/ifup wan # Restart WAN port
+user=$1
+pass=$2
+ip="10.255.2.2"  # Your IP address here
+
+# Attempt login
+login "$ip" "$user" "$pass"
